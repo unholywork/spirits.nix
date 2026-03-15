@@ -67,6 +67,7 @@ hostPkgs.writeShellApplication {
       ${lib.optionalString (stateDir != null) ''--save-state "${stateDir}/spirit.vzvmsave"''}
     )
     ${lib.optionalString (stateDir != null) ''CMD+=("''${RESTORE_ARGS[@]}")''}
+    CMD+=("$@")
     exec "''${CMD[@]}"
   '';
 }

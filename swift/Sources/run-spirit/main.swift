@@ -11,6 +11,7 @@ struct Options {
     var disks: [String] = []
     var saveStatePath: String? = nil
     var restoreStatePath: String? = nil
+    var headless: Bool = false
 }
 
 func parseArgs() -> Options {
@@ -32,6 +33,7 @@ func parseArgs() -> Options {
           --disk PATH             Disk image to attach (repeatable)
           --save-state PATH       Path used by the Ctrl-] menu 's' option to save VM state
           --restore-state PATH    Restore VM state from file (skip boot)
+          --headless              Run without terminal interaction (for automated use)
           --help                  Show this help
 
         Press Ctrl-] while running to pause the VM and show the control menu.
@@ -83,6 +85,8 @@ func parseArgs() -> Options {
             opts.saveStatePath = nextArg("--save-state")
         case "--restore-state":
             opts.restoreStatePath = nextArg("--restore-state")
+        case "--headless":
+            opts.headless = true
         case "--help", "-h":
             usage()
         default:
@@ -222,8 +226,10 @@ let opts = parseArgs()
 signal(SIGPIPE, SIG_IGN)
 
 // Open /dev/tty for a fresh file description for reading keyboard input.
-let ttyFd = Darwin.open("/dev/tty", O_RDONLY)
-if ttyFd >= 0 { ttyReadFd = ttyFd }
+if !opts.headless {
+    let ttyFd = Darwin.open("/dev/tty", O_RDONLY)
+    if ttyFd >= 0 { ttyReadFd = ttyFd }
+}
 
 do {
     let inputPipe = Pipe()
@@ -241,11 +247,13 @@ do {
 
     let vm = VZVirtualMachine(configuration: config)
 
-    setupRawTerminal()
+    if !opts.headless {
+        setupRawTerminal()
+    }
 
     // Observe VM state
     let delegate = VMDelegate {
-        restoreTerminal()
+        if !opts.headless { restoreTerminal() }
         Darwin.exit(0)
     }
     vm.delegate = delegate
@@ -308,38 +316,40 @@ do {
     }
 
     // Forward stdin to the VM's serial port, intercepting Ctrl+] for the menu.
-    let menuSemaphore = DispatchSemaphore(value: 0)
-    DispatchQueue.global(qos: .userInteractive).async {
-        var byte: UInt8 = 0
-        while true {
-            let n = read(ttyReadFd, &byte, 1)
-            if n == 1 {
-                if byte == 0x1D {  // Ctrl+]
-                    DispatchQueue.main.async {
-                        showMenu(vm: vm, saveStatePath: opts.saveStatePath, semaphore: menuSemaphore)
+    if !opts.headless {
+        let menuSemaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInteractive).async {
+            var byte: UInt8 = 0
+            while true {
+                let n = read(ttyReadFd, &byte, 1)
+                if n == 1 {
+                    if byte == 0x1D {  // Ctrl+]
+                        DispatchQueue.main.async {
+                            showMenu(vm: vm, saveStatePath: opts.saveStatePath, semaphore: menuSemaphore)
+                        }
+                        menuSemaphore.wait()
+                    } else {
+                        inputPipe.fileHandleForWriting.write(Data([byte]))
                     }
-                    menuSemaphore.wait()
+                } else if n == -1 && errno == EINTR {
+                    continue  // retry on signal interrupt (e.g. SIGWINCH)
                 } else {
-                    inputPipe.fileHandleForWriting.write(Data([byte]))
+                    let reason = n == 0 ? "EOF" : "error (errno=\(errno): \(String(cString: strerror(errno))))"
+                    fputs("\r\n[run-spirit] stdin read exited: \(reason)\r\n", stderr)
+                    break
                 }
-            } else if n == -1 && errno == EINTR {
-                continue  // retry on signal interrupt (e.g. SIGWINCH)
-            } else {
-                let reason = n == 0 ? "EOF" : "error (errno=\(errno): \(String(cString: strerror(errno))))"
-                fputs("\r\n[run-spirit] stdin read exited: \(reason)\r\n", stderr)
-                break
             }
-        }
-        // stdin EOF/error
-        DispatchQueue.main.async {
-            restoreTerminal()
-            Darwin.exit(0)
+            // stdin EOF/error
+            DispatchQueue.main.async {
+                restoreTerminal()
+                Darwin.exit(0)
+            }
         }
     }
 
     dispatchMain()
 } catch {
-    restoreTerminal()
+    if !opts.headless { restoreTerminal() }
     fputs("Error: \(error.localizedDescription)\n", stderr)
     Darwin.exit(1)
 }

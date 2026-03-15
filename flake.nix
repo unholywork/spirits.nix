@@ -38,6 +38,41 @@
       };
 
       spiritBin = "${run-spirit}/bin/run-spirit";
+
+      testSSHKey =
+        hostPkgs.runCommand "test-ssh-key"
+          {
+            nativeBuildInputs = [ hostPkgs.openssh ];
+          }
+          ''
+            mkdir -p $out
+            ssh-keygen -t ed25519 -f $out/id_ed25519 -N "" -q
+          '';
+
+      testVM = import ./tests/test-vm.nix {
+        inherit nixpkgs;
+        spiritsModule = self.nixosModules.default;
+        sshPubKey = builtins.readFile "${testSSHKey}/id_ed25519.pub";
+      };
+
+      testVMRunner = import ./lib/make-vm.nix {
+        name = "run-test-vm";
+        nixosConfig = testVM;
+        inherit hostPkgs spiritBin;
+      };
+
+      runTests = hostPkgs.writeShellApplication {
+        name = "spirits-test";
+        runtimeInputs = with hostPkgs; [
+          openssh
+          curl
+          coreutils
+          gnugrep
+        ];
+        text = ''
+          exec ${./tests/run-tests.sh} ${testVMRunner}/bin/run-test-vm ${testSSHKey}/id_ed25519 "$@"
+        '';
+      };
     in
     {
       nixosModules.default = {
@@ -48,5 +83,11 @@
       };
 
       darwinModules.default = import ./modules/darwin/vms.nix { inherit spiritBin; };
+
+      packages.${darwinSystem} = {
+        inherit run-spirit;
+        test-vm = testVMRunner;
+        run-tests = runTests;
+      };
     };
 }
