@@ -60,6 +60,7 @@ hostPkgs.writeShellApplication {
       --cpus ${toString spiritsCfg.cpus}
       --memory ${toString spiritsCfg.memoryMiB}
       --share /nix/store:nix-store
+      --share /nix/var/nix/db:nix-db
       ${lib.concatStringsSep "\n      " (
         lib.mapAttrsToList (tag: share: "--share ${share.hostPath}:${tag}") sharedDirs
       )}

@@ -156,22 +156,27 @@ in
         mkdir -p $targetRoot/nix/.rw-store/upper $targetRoot/nix/.rw-store/work
       '';
 
-      # Register store paths in the guest Nix DB so the daemon can function.
-      # Uses postBootCommands which runs in stage 2 boot before any systemd services,
-      # avoiding ordering cycles with nix-daemon.socket.
+      # Mount host Nix DB read-only via virtiofs
+      fileSystems."/nix/.ro-db" = {
+        device = "nix-db";
+        fsType = "virtiofs";
+        options = [ "ro" ];
+        neededForBoot = true;
+      };
+
+      # Copy host DB to writable tmpfs (fast file copy, avoids SQLite locking issues with overlay)
       boot.postBootCommands = ''
         mkdir -p /nix/var/nix/db /nix/var/nix/gcroots /nix/var/nix/profiles /nix/var/nix/userpool
         mkdir -p /nix/var/nix/daemon-socket
         chmod 0755 /nix/var/nix/daemon-socket
-        if [[ "$(cat /proc/cmdline)" =~ regInfo=([^ ]*) ]]; then
-          ${config.nix.package.out}/bin/nix-store --load-db < "''${BASH_REMATCH[1]}"
-        fi
+        cp /nix/.ro-db/db.sqlite /nix/var/nix/db/db.sqlite
       '';
 
       # Networking via systemd-networkd
       networking.useNetworkd = true;
       networking.useDHCP = false;
       systemd.network.enable = true;
+      systemd.network.wait-online.enable = false;
     }
 
     # Networking: DHCP by default
