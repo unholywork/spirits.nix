@@ -193,6 +193,9 @@ in
         cp /nix/.ro-db/db.sqlite /nix/var/nix/db/db.sqlite
       '';
 
+      # Skip firewall behind NAT for faster boot
+      networking.firewall.enable = lib.mkDefault (cfg.networking.mode == "bridged");
+
       # Networking via systemd-networkd
       networking.useNetworkd = true;
       networking.useDHCP = false;
@@ -225,6 +228,7 @@ in
     (lib.mkIf (cfg.hostKeys != [ ]) {
       # Disable automatic host key generation — we provide our own
       services.openssh.hostKeys = lib.mkForce [ ];
+      services.openssh.generateHostKeys = false;
 
       systemd.services.install-ssh-host-keys = {
         description = "Install SSH host keys from host secrets";
