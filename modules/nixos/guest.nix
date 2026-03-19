@@ -22,10 +22,31 @@ in
       description = "Memory in MiB.";
     };
 
-    staticIP = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = "Static IP address for the guest (in 192.168.64.0/24). Uses DHCP when null.";
+    networking = {
+      mode = lib.mkOption {
+        type = lib.types.enum [
+          "nat"
+          "bridged"
+        ];
+        default = "nat";
+        description = "Networking mode. NAT uses Apple's built-in virtual network; bridged attaches directly to a host interface (requires sudo).";
+      };
+
+      nat = {
+        staticIP = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "Static IP address on the NAT subnet (192.168.64.0/24). Uses DHCP when null.";
+        };
+      };
+
+      bridged = {
+        interface = lib.mkOption {
+          type = lib.types.str;
+          default = "en0";
+          description = "Host network interface to bridge to.";
+        };
+      };
     };
 
     stateDir = lib.mkOption {
@@ -188,12 +209,12 @@ in
       };
     }
 
-    # Static IP override
-    (lib.mkIf (cfg.staticIP != null) {
+    # NAT static IP override
+    (lib.mkIf (cfg.networking.mode == "nat" && cfg.networking.nat.staticIP != null) {
       systemd.network.networks."10-virtio" = {
         networkConfig = {
           DHCP = lib.mkForce "no";
-          Address = [ "${cfg.staticIP}/24" ];
+          Address = [ "${cfg.networking.nat.staticIP}/24" ];
           Gateway = [ "192.168.64.1" ];
           DNS = [ "192.168.64.1" ];
         };

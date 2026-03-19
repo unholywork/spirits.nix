@@ -24,6 +24,12 @@ enum VMConfigError: LocalizedError {
     }
 }
 
+struct VMSetup {
+    let config: VZVirtualMachineConfiguration
+    /// Non-nil when bridged networking is active. Must be kept alive for the VM's lifetime.
+    let vmnetBridge: VmnetBridge?
+}
+
 func createVMConfiguration(
     kernelPath: String,
     initrdPath: String,
@@ -32,8 +38,9 @@ func createVMConfiguration(
     memoryMiB: UInt64,
     shares: [SharedDirectory],
     disks: [String],
-    serialInput: FileHandle
-) throws -> VZVirtualMachineConfiguration {
+    serialInput: FileHandle,
+    bridgedInterface: String? = nil
+) throws -> VMSetup {
     let config = VZVirtualMachineConfiguration()
 
     // Boot loader
@@ -66,9 +73,16 @@ func createVMConfiguration(
     serialPort.attachment = stdioAttachment
     config.serialPorts = [serialPort]
 
-    // NAT networking
+    // Networking
+    var vmnetBridge: VmnetBridge? = nil
     let networkDevice = VZVirtioNetworkDeviceConfiguration()
-    networkDevice.attachment = VZNATNetworkDeviceAttachment()
+    if let ifName = bridgedInterface {
+        let bridge = try VmnetBridge.start(bridgedTo: ifName)
+        networkDevice.attachment = VZFileHandleNetworkDeviceAttachment(fileHandle: bridge.vmHandle)
+        vmnetBridge = bridge
+    } else {
+        networkDevice.attachment = VZNATNetworkDeviceAttachment()
+    }
     config.networkDevices = [networkDevice]
 
     // Entropy
@@ -106,7 +120,7 @@ func createVMConfiguration(
     // Validate
     try config.validate()
 
-    return config
+    return VMSetup(config: config, vmnetBridge: vmnetBridge)
 }
 
 class VMDelegate: NSObject, VZVirtualMachineDelegate {

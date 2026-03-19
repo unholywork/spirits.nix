@@ -12,6 +12,7 @@ struct Options {
     var saveStatePath: String? = nil
     var restoreStatePath: String? = nil
     var headless: Bool = false
+    var bridgedInterface: String? = nil
 }
 
 func parseArgs() -> Options {
@@ -33,6 +34,7 @@ func parseArgs() -> Options {
           --disk PATH             Disk image to attach (repeatable)
           --save-state PATH       Path used by the Ctrl-] menu 's' option to save VM state
           --restore-state PATH    Restore VM state from file (skip boot)
+          --bridged-interface IF  Bridge VM network to host interface (e.g. en0)
           --headless              Run without terminal interaction (for automated use)
           --help                  Show this help
 
@@ -85,6 +87,8 @@ func parseArgs() -> Options {
             opts.saveStatePath = nextArg("--save-state")
         case "--restore-state":
             opts.restoreStatePath = nextArg("--restore-state")
+        case "--bridged-interface":
+            opts.bridgedInterface = nextArg("--bridged-interface")
         case "--headless":
             opts.headless = true
         case "--help", "-h":
@@ -234,7 +238,7 @@ if !opts.headless {
 do {
     let inputPipe = Pipe()
 
-    let config = try createVMConfiguration(
+    let setup = try createVMConfiguration(
         kernelPath: opts.kernel,
         initrdPath: opts.initrd,
         cmdline: opts.cmdline,
@@ -242,10 +246,15 @@ do {
         memoryMiB: opts.memory,
         shares: opts.shares,
         disks: opts.disks,
-        serialInput: inputPipe.fileHandleForReading
+        serialInput: inputPipe.fileHandleForReading,
+        bridgedInterface: opts.bridgedInterface
     )
+    // Prevent the bridge from being deallocated while the VM runs.
+    // This variable is intentionally unused beyond keeping the reference alive;
+    // dispatchMain() below never returns so it persists for the process lifetime.
+    let vmnetBridge = setup.vmnetBridge
 
-    let vm = VZVirtualMachine(configuration: config)
+    let vm = VZVirtualMachine(configuration: setup.config)
 
     if !opts.headless {
         setupRawTerminal()

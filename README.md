@@ -55,6 +55,16 @@ After switching, run `run-<vm name>` to launch the VM.
     cpus = 4; # default: 4
     memoryMiB = 4096; # default: 4096
 
+    # Networking mode: "nat" (default) or "bridged"
+    networking.mode = "nat";
+
+    # NAT options:
+    networking.nat.staticIP = "192.168.64.100"; # default: null (DHCP)
+
+    # Bridged options (requires sudo; firewall is auto-enabled):
+    # networking.mode = "bridged";
+    # networking.bridged.interface = "en0"; # default: "en0"
+
     # Shared directories:
     sharedDirectories.projects = {
       hostPath = "/Users/me/projects";
@@ -97,6 +107,6 @@ While a VM is running, press **Ctrl+]** to pause it and open the control menu:
 ## Implementation Details
 
 - Guests use a tmpfs root FS.
-- The hosts `/nix/store` is shared (RO) with guests.
+- The host's `/nix/store` is shared (RO) with guests via virtiofs.
 - Guests create a tmpfs overlay over the shared `/nix/store`.
-- Network is provided via NAT.
+- The Nix DB is copied to writable tmpfs on boot, so `nix` commands work inside the guest.

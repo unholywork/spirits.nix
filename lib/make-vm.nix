@@ -29,6 +29,7 @@ let
   hasDisk = spiritsCfg.disk.enable;
   disk = spiritsCfg.disk;
   stateDir = spiritsCfg.stateDir;
+  bridged = spiritsCfg.bridgedInterface != null;
 
   diskSetup = lib.optionalString hasDisk ''
     DISK_PATH="${disk.hostPath}"
@@ -65,10 +66,19 @@ hostPkgs.writeShellApplication {
         lib.mapAttrsToList (tag: share: "--share ${share.hostPath}:${tag}") sharedDirs
       )}
       ${lib.optionalString hasDisk ''--disk "$DISK_PATH"''}
+      ${lib.optionalString (
+        spiritsCfg.bridgedInterface != null
+      ) "--bridged-interface ${lib.escapeShellArg spiritsCfg.bridgedInterface}"}
       ${lib.optionalString (stateDir != null) ''--save-state "${stateDir}/spirit.vzvmsave"''}
     )
     ${lib.optionalString (stateDir != null) ''CMD+=("''${RESTORE_ARGS[@]}")''}
     CMD+=("$@")
+    ${lib.optionalString bridged ''
+      # Bridged networking uses vmnet.framework which requires root.
+      if [ "$(id -u)" -ne 0 ]; then
+        exec sudo "''${CMD[@]}"
+      fi
+    ''}
     exec "''${CMD[@]}"
   '';
 }
