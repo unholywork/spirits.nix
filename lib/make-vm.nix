@@ -29,7 +29,8 @@ let
   hasDisk = spiritsCfg.disk.enable;
   disk = spiritsCfg.disk;
   stateDir = spiritsCfg.stateDir;
-  bridged = spiritsCfg.bridgedInterface != null;
+  netCfg = spiritsCfg.networking;
+  bridged = netCfg.mode == "bridged";
 
   diskSetup = lib.optionalString hasDisk ''
     DISK_PATH="${disk.hostPath}"
@@ -66,9 +67,7 @@ hostPkgs.writeShellApplication {
         lib.mapAttrsToList (tag: share: "--share ${share.hostPath}:${tag}") sharedDirs
       )}
       ${lib.optionalString hasDisk ''--disk "$DISK_PATH"''}
-      ${lib.optionalString (
-        spiritsCfg.bridgedInterface != null
-      ) "--bridged-interface ${lib.escapeShellArg spiritsCfg.bridgedInterface}"}
+      ${lib.optionalString bridged "--bridged-interface ${lib.escapeShellArg netCfg.bridged.interface}"}
       ${lib.optionalString (stateDir != null) ''--save-state "${stateDir}/spirit.vzvmsave"''}
     )
     ${lib.optionalString (stateDir != null) ''CMD+=("''${RESTORE_ARGS[@]}")''}

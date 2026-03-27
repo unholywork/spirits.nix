@@ -39,38 +39,29 @@
 
       spiritBin = "${run-spirit}/bin/run-spirit";
 
-      testSSHKey =
-        hostPkgs.runCommand "test-ssh-key"
-          {
-            nativeBuildInputs = [ hostPkgs.openssh ];
-          }
-          ''
-            mkdir -p $out
-            ssh-keygen -t ed25519 -f $out/id_ed25519 -N "" -q
-          '';
-
-      testVM = import ./tests/test-vm.nix {
-        inherit nixpkgs;
-        spiritsModule = self.nixosModules.default;
-        sshPubKey = builtins.readFile "${testSSHKey}/id_ed25519.pub";
-      };
-
-      testVMRunner = import ./lib/make-vm.nix {
-        name = "run-test-vm";
-        nixosConfig = testVM;
-        inherit hostPkgs spiritBin;
-      };
-
       runTests = hostPkgs.writeShellApplication {
-        name = "spirits-test";
-        runtimeInputs = with hostPkgs; [
-          openssh
-          curl
-          coreutils
-          gnugrep
-        ];
+        name = "spirits-run-tests";
+        runtimeInputs = [ hostPkgs.nix ];
         text = ''
-          exec ${./tests/run-tests.sh} ${testVMRunner}/bin/run-test-vm ${testSSHKey}/id_ed25519 "$@"
+          FAILURES=0
+          for test in tests/*/; do
+            test_name="$(basename "$test")"
+            # Skip non-test directories (e.g. lib/)
+            [ -f "$test/flake.nix" ] || continue
+            echo "=== Running test: $test_name ==="
+            if nix run "./$test#run-tests" -- "$@"; then
+              echo "=== $test_name: PASSED ==="
+            else
+              echo "=== $test_name: FAILED ==="
+              ((FAILURES++))
+            fi
+            echo ""
+          done
+          if [ "$FAILURES" -gt 0 ]; then
+            echo "$FAILURES test suite(s) failed."
+            exit 1
+          fi
+          echo "All test suites passed."
         '';
       };
     in
@@ -86,7 +77,6 @@
 
       packages.${darwinSystem} = {
         inherit run-spirit;
-        test-vm = testVMRunner;
         run-tests = runTests;
       };
     };
