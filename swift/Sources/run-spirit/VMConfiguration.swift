@@ -102,8 +102,8 @@ func createVMConfiguration(
     }
     config.directorySharingDevices = fsDevices
 
-    // Memory balloon for dynamic memory management
-    config.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()]
+    // No memory balloon for now to remove a potential source of instability
+    config.memoryBalloonDevices = []
 
     // Disk images
     var storageDevices: [VZStorageDeviceConfiguration] = []
