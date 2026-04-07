@@ -61,10 +61,13 @@ hostPkgs.writeShellApplication {
       --cmdline "$(printf '%s' ${lib.escapeShellArg kernelParams})"
       --cpus ${toString spiritsCfg.cpus}
       --memory ${toString spiritsCfg.memoryMiB}
-      --share /nix/store:nix-store
-      --share /nix/var/nix/db:nix-db
+      --share /nix/store:nix-store:ro
+      --share /nix/var/nix/db:nix-db:ro
       ${lib.concatStringsSep "\n      " (
-        lib.mapAttrsToList (tag: share: "--share ${share.hostPath}:${tag}") sharedDirs
+        lib.mapAttrsToList (
+          tag: share:
+          "--share ${share.hostPath}:${tag}${lib.optionalString share.readOnly ":ro"}"
+        ) sharedDirs
       )}
       ${lib.optionalString hasDisk ''--disk "$DISK_PATH"''}
       ${lib.optionalString bridged "--bridged-interface ${lib.escapeShellArg netCfg.bridged.interface}"}

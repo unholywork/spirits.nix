@@ -89,6 +89,7 @@ run_test() {
   printf "  %-30s " "$name"
   if output=$(ssh "${SSH_OPTS[@]}" "root@${VM_IP}" "$@" 2>&1); then
     echo "PASS"
+    echo "    output: $output"
     return 0
   else
     echo "FAIL"

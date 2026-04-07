@@ -138,12 +138,20 @@ in
         ];
       };
 
-      # Mount host /nix/store via virtiofs as a lower layer, then overlay with tmpfs
-      # so that Nix can chown /nix/store and write to the DB without modifying the host store.
-      fileSystems."/nix/.ro-store" = {
-        device = "nix-store";
+      # Single virtiofs mount for all host shares, then bind-mount subdirectories
+      fileSystems."/nix/.host" = {
+        device = "shares";
         fsType = "virtiofs";
         options = [ "ro" ];
+        neededForBoot = true;
+      };
+
+      # Bind-mount the nix store from the shared virtiofs device
+      fileSystems."/nix/.ro-store" = {
+        device = "/nix/.host/nix-store";
+        fsType = "none";
+        options = [ "bind" "ro" ];
+        depends = [ "/nix/.host" ];
         neededForBoot = true;
       };
 
@@ -177,11 +185,12 @@ in
         mkdir -p $targetRoot/nix/.rw-store/upper $targetRoot/nix/.rw-store/work
       '';
 
-      # Mount host Nix DB read-only via virtiofs
+      # Bind-mount the nix DB from the shared virtiofs device
       fileSystems."/nix/.ro-db" = {
-        device = "nix-db";
-        fsType = "virtiofs";
-        options = [ "ro" ];
+        device = "/nix/.host/nix-db";
+        fsType = "none";
+        options = [ "bind" "ro" ];
+        depends = [ "/nix/.host" ];
         neededForBoot = true;
       };
 

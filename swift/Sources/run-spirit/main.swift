@@ -30,7 +30,7 @@ func parseArgs() -> Options {
           --cmdline STRING        Kernel command line
           --cpus N                Number of virtual CPUs (default: 4)
           --memory N              Memory in MiB (default: 4096)
-          --share PATH:TAG        Virtio-fs share (repeatable)
+          --share PATH:TAG[:ro]   Virtio-fs share (repeatable, :ro for read-only)
           --disk PATH             Disk image to attach (repeatable)
           --save-state PATH       Path used by the Ctrl-] menu 's' option to save VM state
           --restore-state PATH    Restore VM state from file (skip boot)
@@ -75,12 +75,13 @@ func parseArgs() -> Options {
             opts.memory = n
         case "--share":
             let val = nextArg("--share")
-            let parts = val.split(separator: ":", maxSplits: 1)
-            guard parts.count == 2 else {
-                fputs("Error: --share must be in HOST_PATH:TAG format\n", stderr)
+            let parts = val.split(separator: ":", maxSplits: 2)
+            guard parts.count >= 2 else {
+                fputs("Error: --share must be in HOST_PATH:TAG[:ro] format\n", stderr)
                 Darwin.exit(1)
             }
-            opts.shares.append(SharedDirectory(hostPath: String(parts[0]), tag: String(parts[1])))
+            let ro = parts.count == 3 && parts[2] == "ro"
+            opts.shares.append(SharedDirectory(hostPath: String(parts[0]), tag: String(parts[1]), readOnly: ro))
         case "--disk":
             opts.disks.append(nextArg("--disk"))
         case "--save-state":

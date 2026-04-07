@@ -31,9 +31,10 @@ in
   config.fileSystems = lib.mapAttrs' (
     tag: share:
     lib.nameValuePair share.mountPoint {
-      device = tag;
-      fsType = "virtiofs";
-      options = if share.readOnly then [ "ro" ] else [ "defaults" ];
+      device = "/nix/.host/${tag}";
+      fsType = "none";
+      options = [ "bind" ] ++ lib.optional share.readOnly "ro";
+      depends = [ "/nix/.host" ];
     }
   ) cfg.sharedDirectories;
 }

@@ -4,6 +4,7 @@ import Virtualization
 struct SharedDirectory {
     let hostPath: String
     let tag: String
+    let readOnly: Bool
 }
 
 enum VMConfigError: LocalizedError {
@@ -88,19 +89,20 @@ func createVMConfiguration(
     // Entropy
     config.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
 
-    // Virtio-fs shared directories
-    var fsDevices: [VZVirtioFileSystemDeviceConfiguration] = []
+    // Virtio-fs shared directories — single device with VZMultipleDirectoryShare
+    var directories: [String: VZSharedDirectory] = [:]
     for share in shares {
         guard FileManager.default.fileExists(atPath: share.hostPath) else {
             throw VMConfigError.sharedDirectoryNotFound(share.hostPath)
         }
-        let sharedDir = VZSharedDirectory(url: URL(fileURLWithPath: share.hostPath), readOnly: false)
-        let singleDirShare = VZSingleDirectoryShare(directory: sharedDir)
-        let fsDevice = VZVirtioFileSystemDeviceConfiguration(tag: share.tag)
-        fsDevice.share = singleDirShare
-        fsDevices.append(fsDevice)
+        directories[share.tag] = VZSharedDirectory(url: URL(fileURLWithPath: share.hostPath), readOnly: share.readOnly)
     }
-    config.directorySharingDevices = fsDevices
+    if !directories.isEmpty {
+        let multiShare = VZMultipleDirectoryShare(directories: directories)
+        let fsDevice = VZVirtioFileSystemDeviceConfiguration(tag: "shares")
+        fsDevice.share = multiShare
+        config.directorySharingDevices = [fsDevice]
+    }
 
     // No memory balloon for now to remove a potential source of instability
     config.memoryBalloonDevices = []
