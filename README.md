@@ -72,6 +72,14 @@ After switching, run `run-<vm name>` to launch the VM.
       readOnly = true; # default: false
     };
 
+    # Ephemeral root disk — replaces tmpfs root with a disk image
+    # that is recreated on each boot. Gives the nix store overlay
+    # more space than the default 512M tmpfs.
+    ephemeralDisk = {
+      enable = true; # default: false
+      sizeMiB = 8192; # default: 8192
+    };
+
     # Attach a persistent disk image:
     disk = {
       enable = true; # default: false
@@ -106,7 +114,8 @@ While a VM is running, press **Ctrl+]** to pause it and open the control menu:
 
 ## Implementation Details
 
-- Guests use a tmpfs root FS.
+- By default, guests use a tmpfs root FS.
 - The host's `/nix/store` is shared (RO) with guests via virtiofs.
-- Guests create a tmpfs overlay over the shared `/nix/store`.
-- The Nix DB is copied to writable tmpfs on boot, so `nix` commands work inside the guest.
+- Guests create an overlay over the shared `/nix/store` so `nix` commands can write to the store.
+- The Nix DB is copied to writable storage on boot, so `nix` commands work inside the guest.
+- With `ephemeralDisk.enable = true`, root switches to an ext4 disk image that is recreated on each boot. This reduces RAM demand and allows for larger nix stores.

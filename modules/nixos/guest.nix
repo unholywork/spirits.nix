@@ -79,11 +79,21 @@ in
       description = "SSH host keys to install from virtiofs-mounted secrets. Disables auto-generation when set.";
     };
 
+    ephemeralDisk = {
+      enable = lib.mkEnableOption "ephemeral root disk (reset on each boot)";
+      sizeMiB = lib.mkOption {
+        type = lib.types.int;
+        default = 8192;
+        description = "Ephemeral disk image size in MiB.";
+      };
+    };
+
     disk = {
       enable = lib.mkEnableOption "persistent disk";
       device = lib.mkOption {
         type = lib.types.str;
-        default = "/dev/vda";
+        default = if cfg.ephemeralDisk.enable then "/dev/vdb" else "/dev/vda";
+        defaultText = lib.literalExpression ''if cfg.ephemeralDisk.enable then "/dev/vdb" else "/dev/vda"'';
         description = "Block device path for the persistent disk.";
       };
       fsType = lib.mkOption {
@@ -155,7 +165,7 @@ in
         neededForBoot = true;
       };
 
-      fileSystems."/nix/.rw-store" = {
+      fileSystems."/nix/.rw-store" = lib.mkIf (!cfg.ephemeralDisk.enable) {
         device = "none";
         fsType = "tmpfs";
         options = [
@@ -175,8 +185,7 @@ in
         ];
         depends = [
           "/nix/.ro-store"
-          "/nix/.rw-store"
-        ];
+        ] ++ lib.optional (!cfg.ephemeralDisk.enable) "/nix/.rw-store";
         neededForBoot = true;
       };
 
@@ -260,6 +269,28 @@ in
             ''
           ) cfg.hostKeys
         );
+      };
+    })
+
+    # Ephemeral root disk — replaces tmpfs root with a disk image that is reset on each boot
+    (lib.mkIf cfg.ephemeralDisk.enable {
+      boot.initrd.availableKernelModules = [ "virtio_blk" ];
+
+      boot.initrd.extraUtilsCommands = ''
+        copy_bin_and_libs ${pkgs.e2fsprogs}/sbin/mke2fs
+        ln -sf mke2fs $out/bin/mkfs.ext4
+      '';
+
+      # Format the empty disk before fsck/mount runs
+      boot.initrd.postDeviceCommands = lib.mkAfter ''
+        if ! blkid /dev/vda >/dev/null 2>&1; then
+          mkfs.ext4 -q /dev/vda
+        fi
+      '';
+
+      fileSystems."/" = lib.mkForce {
+        device = "/dev/vda";
+        fsType = "ext4";
       };
     })
 

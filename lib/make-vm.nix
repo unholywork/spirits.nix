@@ -26,11 +26,20 @@ let
 
   sharedDirs = spiritsCfg.sharedDirectories;
 
+  hasEphemeralDisk = spiritsCfg.ephemeralDisk.enable;
+  ephemeralDisk = spiritsCfg.ephemeralDisk;
+
   hasDisk = spiritsCfg.disk.enable;
   disk = spiritsCfg.disk;
   stateDir = spiritsCfg.stateDir;
   netCfg = spiritsCfg.networking;
   bridged = netCfg.mode == "bridged";
+
+  ephemeralDiskSetup = lib.optionalString hasEphemeralDisk ''
+    EPHEMERAL_DISK="''${TMPDIR:-/tmp}/spirit-${name}.img"
+    rm -f "$EPHEMERAL_DISK"
+    truncate -s ${toString ephemeralDisk.sizeMiB}M "$EPHEMERAL_DISK"
+  '';
 
   diskSetup = lib.optionalString hasDisk ''
     DISK_PATH="${disk.hostPath}"
@@ -52,6 +61,7 @@ in
 hostPkgs.writeShellApplication {
   inherit name;
   text = ''
+    ${ephemeralDiskSetup}
     ${diskSetup}
     ${stateSetup}
     CMD=(
@@ -69,6 +79,7 @@ hostPkgs.writeShellApplication {
           "--share ${share.hostPath}:${tag}${lib.optionalString share.readOnly ":ro"}"
         ) sharedDirs
       )}
+      ${lib.optionalString hasEphemeralDisk ''--disk "$EPHEMERAL_DISK"''}
       ${lib.optionalString hasDisk ''--disk "$DISK_PATH"''}
       ${lib.optionalString bridged "--bridged-interface ${lib.escapeShellArg netCfg.bridged.interface}"}
       ${lib.optionalString (stateDir != null) ''--save-state "${stateDir}/spirit.vzvmsave"''}
