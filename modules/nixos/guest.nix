@@ -148,11 +148,12 @@ in
         ];
       };
 
-      # Single virtiofs mount for all host shares, then bind-mount subdirectories
+      # Single virtiofs mount for all host shares, then bind-mount subdirectories.
+      # Not mounted ro — individual shares control their own read-only flag via
+      # the virtiofs device layer and bind-mount options.
       fileSystems."/nix/.host" = {
         device = "shares";
         fsType = "virtiofs";
-        options = [ "ro" ];
         neededForBoot = true;
       };
 
