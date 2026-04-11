@@ -299,6 +299,18 @@ in
     (lib.mkIf cfg.disk.enable {
       boot.initrd.availableKernelModules = [ "virtio_blk" ];
 
+      boot.initrd.extraUtilsCommands = lib.mkIf (cfg.disk.fsType == "ext4") ''
+        copy_bin_and_libs ${pkgs.e2fsprogs}/sbin/mke2fs
+        ln -sf mke2fs $out/bin/mkfs.ext4
+      '';
+
+      # Format a brand new persistent disk image before fsck/mount runs.
+      boot.initrd.postDeviceCommands = lib.mkIf (cfg.disk.fsType == "ext4") (lib.mkAfter ''
+        if ! blkid ${cfg.disk.device} >/dev/null 2>&1; then
+          mkfs.ext4 -q ${cfg.disk.device}
+        fi
+      '');
+
       fileSystems.${cfg.disk.mountPoint} = {
         device = cfg.disk.device;
         fsType = cfg.disk.fsType;
