@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  utils,
   ...
 }:
 
@@ -177,23 +178,17 @@ in
       };
 
       fileSystems."/nix/store" = {
-        device = "overlay";
         fsType = "overlay";
-        options = [
-          "lowerdir=/nix/.ro-store"
-          "upperdir=/nix/.rw-store/upper"
-          "workdir=/nix/.rw-store/work"
-        ];
+        overlay = {
+          lowerdir = [ "/nix/.ro-store" ];
+          upperdir = "/nix/.rw-store/upper";
+          workdir = "/nix/.rw-store/work";
+        };
         depends = [
           "/nix/.ro-store"
         ] ++ lib.optional (!cfg.ephemeralDisk.enable) "/nix/.rw-store";
         neededForBoot = true;
       };
-
-      # Create overlay directories early in boot
-      boot.initrd.postMountCommands = ''
-        mkdir -p $targetRoot/nix/.rw-store/upper $targetRoot/nix/.rw-store/work
-      '';
 
       # Bind-mount the nix DB from the shared virtiofs device
       fileSystems."/nix/.ro-db" = {
@@ -277,17 +272,29 @@ in
     (lib.mkIf cfg.ephemeralDisk.enable {
       boot.initrd.availableKernelModules = [ "virtio_blk" ];
 
-      boot.initrd.extraUtilsCommands = ''
-        copy_bin_and_libs ${pkgs.e2fsprogs}/sbin/mke2fs
-        ln -sf mke2fs $out/bin/mkfs.ext4
-      '';
+      boot.initrd.systemd.storePaths = [ "${pkgs.e2fsprogs}/sbin/mke2fs" ];
 
       # Format the empty disk before fsck/mount runs
-      boot.initrd.postDeviceCommands = lib.mkAfter ''
-        if ! blkid /dev/vda >/dev/null 2>&1; then
-          mkfs.ext4 -q /dev/vda
-        fi
-      '';
+      boot.initrd.systemd.services.format-ephemeral-disk = {
+        description = "Format ephemeral disk if empty";
+        requires = [ "dev-vda.device" ];
+        after = [ "dev-vda.device" ];
+        requiredBy = [ "sysroot.mount" ];
+        before = [ "sysroot.mount" ];
+        unitConfig = {
+          DefaultDependencies = false;
+          ConditionPathExists = "/etc/initrd-release";
+        };
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        script = ''
+          if ! ${pkgs.util-linux}/bin/blkid /dev/vda >/dev/null 2>&1; then
+            ${pkgs.e2fsprogs}/sbin/mke2fs -t ext4 -q /dev/vda
+          fi
+        '';
+      };
 
       fileSystems."/" = lib.mkForce {
         device = "/dev/vda";
@@ -299,17 +306,31 @@ in
     (lib.mkIf cfg.disk.enable {
       boot.initrd.availableKernelModules = [ "virtio_blk" ];
 
-      boot.initrd.extraUtilsCommands = lib.mkIf (cfg.disk.fsType == "ext4") ''
-        copy_bin_and_libs ${pkgs.e2fsprogs}/sbin/mke2fs
-        ln -sf mke2fs $out/bin/mkfs.ext4
-      '';
+      boot.initrd.systemd.storePaths = lib.mkIf (cfg.disk.fsType == "ext4") [
+        "${pkgs.e2fsprogs}/sbin/mke2fs"
+      ];
 
       # Format a brand new persistent disk image before fsck/mount runs.
-      boot.initrd.postDeviceCommands = lib.mkIf (cfg.disk.fsType == "ext4") (lib.mkAfter ''
-        if ! blkid ${cfg.disk.device} >/dev/null 2>&1; then
-          mkfs.ext4 -q ${cfg.disk.device}
-        fi
-      '');
+      boot.initrd.systemd.services.format-persistent-disk = lib.mkIf (cfg.disk.fsType == "ext4") {
+        description = "Format persistent disk if empty";
+        requires = [ "${utils.escapeSystemdPath cfg.disk.device}.device" ];
+        after = [ "${utils.escapeSystemdPath cfg.disk.device}.device" ];
+        requiredBy = [ "initrd-fs.target" ];
+        before = [ "initrd-fs.target" ];
+        unitConfig = {
+          DefaultDependencies = false;
+          ConditionPathExists = "/etc/initrd-release";
+        };
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        script = ''
+          if ! ${pkgs.util-linux}/bin/blkid ${cfg.disk.device} >/dev/null 2>&1; then
+            ${pkgs.e2fsprogs}/sbin/mke2fs -t ext4 -q ${cfg.disk.device}
+          fi
+        '';
+      };
 
       fileSystems.${cfg.disk.mountPoint} = {
         device = cfg.disk.device;
