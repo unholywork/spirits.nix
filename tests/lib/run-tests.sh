@@ -6,15 +6,25 @@ set -euo pipefail
 VM_SCRIPT="$1"
 SSH_KEY="$2"
 TEST_SCRIPT="$3"
-TIMEOUT="${4:-120}"
+TIMEOUT="${4:-30}"
 
 SERIAL_LOG=$(mktemp)
+VM_PID=""
+
 cleanup() {
-  kill "$VM_PID" 2>/dev/null || true
-  wait "$VM_PID" 2>/dev/null || true
+  if [ -n "$VM_PID" ]; then
+    kill "$VM_PID" 2>/dev/null || true
+    wait "$VM_PID" 2>/dev/null || true
+  fi
   rm -f "$SERIAL_LOG"
 }
 trap cleanup EXIT
+
+show_vm_output() {
+  echo ""
+  echo "=== VM Output ==="
+  cat "$SERIAL_LOG"
+}
 
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o BatchMode=yes -o LogLevel=ERROR -i "$SSH_KEY")
 
@@ -36,6 +46,7 @@ while [ $SECONDS -lt $DEADLINE ]; do
   fi
   if ! kill -0 "$VM_PID" 2>/dev/null; then
     echo "FAIL: VM process exited unexpectedly"
+    show_vm_output
     exit 1
   fi
   sleep 0.5
@@ -43,6 +54,7 @@ done
 
 if ! $BOOT_DETECTED; then
   echo "FAIL: VM did not boot within ${TIMEOUT}s"
+  show_vm_output
   exit 1
 fi
 
@@ -51,6 +63,7 @@ fi
 VM_IP=$(grep -o 'ip=[^ ]*' "$SERIAL_LOG" | head -1 | cut -d= -f2 | tr -d '\r')
 if [ -z "$VM_IP" ]; then
   echo "FAIL: Could not determine VM IP from serial log"
+  show_vm_output
   exit 1
 fi
 echo "VM IP: $VM_IP"
@@ -73,6 +86,7 @@ done
 
 if ! $SSH_READY; then
   echo "FAIL: SSH not available within 30s after boot"
+  show_vm_output
   exit 1
 fi
 
@@ -115,6 +129,7 @@ if [ "$FAILURES" -eq 0 ]; then
   echo "All tests passed."
 else
   echo "${FAILURES} test(s) failed."
+  show_vm_output
 fi
 
 # Shut down VM

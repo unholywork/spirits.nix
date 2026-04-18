@@ -272,7 +272,10 @@ in
     (lib.mkIf cfg.ephemeralDisk.enable {
       boot.initrd.availableKernelModules = [ "virtio_blk" ];
 
-      boot.initrd.systemd.storePaths = [ "${pkgs.e2fsprogs}/sbin/mke2fs" ];
+      boot.initrd.systemd.storePaths = [
+        "${pkgs.e2fsprogs}/bin/tune2fs"
+        "${pkgs.e2fsprogs}/sbin/mke2fs"
+      ];
 
       # Format the empty disk before fsck/mount runs
       boot.initrd.systemd.services.format-ephemeral-disk = {
@@ -280,7 +283,10 @@ in
         requires = [ "dev-vda.device" ];
         after = [ "dev-vda.device" ];
         requiredBy = [ "sysroot.mount" ];
-        before = [ "sysroot.mount" ];
+        before = [
+          "systemd-fsck-root.service"
+          "sysroot.mount"
+        ];
         unitConfig = {
           DefaultDependencies = false;
           ConditionPathExists = "/etc/initrd-release";
@@ -290,7 +296,7 @@ in
           RemainAfterExit = true;
         };
         script = ''
-          if ! ${pkgs.util-linux}/bin/blkid /dev/vda >/dev/null 2>&1; then
+          if ! ${pkgs.e2fsprogs}/bin/tune2fs -l /dev/vda >/dev/null 2>&1; then
             ${pkgs.e2fsprogs}/sbin/mke2fs -t ext4 -q /dev/vda
           fi
         '';
@@ -307,6 +313,7 @@ in
       boot.initrd.availableKernelModules = [ "virtio_blk" ];
 
       boot.initrd.systemd.storePaths = lib.mkIf (cfg.disk.fsType == "ext4") [
+        "${pkgs.e2fsprogs}/bin/tune2fs"
         "${pkgs.e2fsprogs}/sbin/mke2fs"
       ];
 
@@ -326,7 +333,7 @@ in
           RemainAfterExit = true;
         };
         script = ''
-          if ! ${pkgs.util-linux}/bin/blkid ${cfg.disk.device} >/dev/null 2>&1; then
+          if ! ${pkgs.e2fsprogs}/bin/tune2fs -l ${cfg.disk.device} >/dev/null 2>&1; then
             ${pkgs.e2fsprogs}/sbin/mke2fs -t ext4 -q ${cfg.disk.device}
           fi
         '';
