@@ -335,7 +335,6 @@ in
       fileSystems.${cfg.disk.mountPoint} = {
         device = cfg.disk.device;
         fsType = cfg.disk.fsType;
-        autoFormat = true;
       };
     })
   ];
