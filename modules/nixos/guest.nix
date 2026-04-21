@@ -199,12 +199,18 @@ in
         neededForBoot = true;
       };
 
-      # Copy host DB to writable tmpfs (fast file copy, avoids SQLite locking issues with overlay)
+      # Copy host DB to writable tmpfs (fast file copy, avoids SQLite locking issues with overlay).
+      # Copy WAL/SHM sidecars too, otherwise the DB snapshot can be stale if the host DB has
+      # uncheckpointed transactions.
       boot.postBootCommands = ''
         mkdir -p /nix/var/nix/db /nix/var/nix/gcroots /nix/var/nix/profiles /nix/var/nix/userpool
         mkdir -p /nix/var/nix/daemon-socket
         chmod 0755 /nix/var/nix/daemon-socket
+
+        rm -f /nix/var/nix/db/db.sqlite /nix/var/nix/db/db.sqlite-wal /nix/var/nix/db/db.sqlite-shm
         cp /nix/.ro-db/db.sqlite /nix/var/nix/db/db.sqlite
+        [ ! -e /nix/.ro-db/db.sqlite-wal ] || cp /nix/.ro-db/db.sqlite-wal /nix/var/nix/db/db.sqlite-wal
+        [ ! -e /nix/.ro-db/db.sqlite-shm ] || cp /nix/.ro-db/db.sqlite-shm /nix/var/nix/db/db.sqlite-shm
       '';
 
       # Skip firewall behind NAT for faster boot
