@@ -1,9 +1,9 @@
 run_test "persist_is_ext4" "mount | grep ' /persist ' | grep -q ext4" || ((FAILURES++))
-run_test "persist_is_vda" "mount | grep ' /persist ' | grep -q /dev/vda" || ((FAILURES++))
+run_test "persist_is_vdb" "mount | grep ' /persist ' | grep -q /dev/vdb" || ((FAILURES++))
 run_test "persist_writable" "echo spirits-test > /persist/spirits-test && sync && test -f /persist/spirits-test" || ((FAILURES++))
 
 printf "  %-30s " "persist_after_reboot"
-before_uuid=$(ssh "${SSH_OPTS[@]}" "root@${VM_IP}" "blkid -s UUID -o value /dev/vda" 2>&1)
+before_uuid=$(ssh "${SSH_OPTS[@]}" "root@${VM_IP}" "blkid -s UUID -o value /dev/vdb" 2>&1)
 if [ $? -ne 0 ] || [ -z "$before_uuid" ]; then
   echo "FAIL"
   echo "    output: failed to read initial disk UUID: $before_uuid"
@@ -40,7 +40,7 @@ else
     echo "    output: VM did not come back after reboot"
     ((FAILURES++))
   else
-    if output=$(ssh "${SSH_OPTS[@]}" "root@${VM_IP}" "set -e; test \"\$(cat /persist/spirits-test)\" = spirits-test; after_uuid=\$(blkid -s UUID -o value /dev/vda); test \"$before_uuid\" = \"\$after_uuid\"; echo UUID=\$after_uuid" 2>&1); then
+    if output=$(ssh "${SSH_OPTS[@]}" "root@${VM_IP}" "set -e; test \"\$(cat /persist/spirits-test)\" = spirits-test; after_uuid=\$(blkid -s UUID -o value /dev/vdb); test \"$before_uuid\" = \"\$after_uuid\"; echo UUID=\$after_uuid" 2>&1); then
       echo "PASS"
       echo "    output: $output"
     else

@@ -14,13 +14,18 @@ let
   kernelPath = "${cfg.system.build.kernel}/${cfg.system.boot.loader.kernelFile}";
   initrdPath = "${cfg.system.build.initialRamdisk}/${cfg.system.boot.loader.initrdFile}";
 
-  regInfo = linuxPkgs.closureInfo { rootPaths = [ toplevel ]; };
+  # Read-only store image containing the system closure. Mounted in the guest
+  # as a virtio-blk disk instead of sharing /nix/store via virtio-fs, which
+  # avoids the multi-VM contention on Apple's virtio-fs implementation.
+  storeImage = linuxPkgs.callPackage (linuxPkgs.path + "/nixos/lib/make-squashfs.nix") {
+    storeContents = [ toplevel ];
+    comp = "zstd -Xcompression-level 6";
+  };
 
   kernelParams = builtins.concatStringsSep " " (
     cfg.boot.kernelParams
     ++ [
       "init=${toplevel}/init"
-      "regInfo=${regInfo}/registration"
     ]
   );
 
@@ -71,8 +76,7 @@ hostPkgs.writeShellApplication {
       --cmdline "$(printf '%s' ${lib.escapeShellArg kernelParams})"
       --cpus ${toString spiritsCfg.cpus}
       --memory ${toString spiritsCfg.memoryMiB}
-      --share /nix/store:nix-store:ro
-      --share /nix/var/nix/db:nix-db:ro
+      --disk ${storeImage}:ro
       ${lib.concatStringsSep "\n      " (
         lib.mapAttrsToList (
           tag: share:

@@ -115,7 +115,7 @@ While a VM is running, press **Ctrl+]** to pause it and open the control menu:
 ## Implementation Details
 
 - By default, guests use a tmpfs root FS.
-- The host's `/nix/store` is shared (RO) with guests via virtiofs.
-- Guests create an overlay over the shared `/nix/store` so `nix` commands can write to the store.
-- The Nix DB is copied to writable storage on boot, so `nix` commands work inside the guest.
+- A read-only squashfs containing the system closure is built on the host at switch time and attached to the guest as a virtio-blk disk. The guest mounts it at `/nix/.ro-store`.
+- Guests create an overlay over the squashfs-backed `/nix/store` so `nix` commands can write to the store.
+- The Nix DB is populated from `nix-path-registration` shipped inside the squashfs, so `nix` commands work inside the guest.
 - With `ephemeralDisk.enable = true`, root switches to an ext4 disk image that is recreated on each boot. This reduces RAM demand and allows for larger nix stores.

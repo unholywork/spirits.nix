@@ -93,8 +93,8 @@ in
       enable = lib.mkEnableOption "persistent disk";
       device = lib.mkOption {
         type = lib.types.str;
-        default = if cfg.ephemeralDisk.enable then "/dev/vdb" else "/dev/vda";
-        defaultText = lib.literalExpression ''if cfg.ephemeralDisk.enable then "/dev/vdb" else "/dev/vda"'';
+        default = if cfg.ephemeralDisk.enable then "/dev/vdc" else "/dev/vdb";
+        defaultText = lib.literalExpression ''if cfg.ephemeralDisk.enable then "/dev/vdc" else "/dev/vdb"'';
         description = "Block device path for the persistent disk.";
       };
       fsType = lib.mkOption {
@@ -132,7 +132,9 @@ in
         "virtiofs"
         "virtio_net"
         "virtio_pci"
+        "virtio_blk"
         "overlay"
+        "squashfs"
       ];
 
       # Serial console output
@@ -149,21 +151,13 @@ in
         ];
       };
 
-      # Single virtiofs mount for all host shares, then bind-mount subdirectories.
-      # Not mounted ro — individual shares control their own read-only flag via
-      # the virtiofs device layer and bind-mount options.
-      fileSystems."/nix/.host" = {
-        device = "shares";
-        fsType = "virtiofs";
-        neededForBoot = true;
-      };
-
-      # Bind-mount the nix store from the shared virtiofs device
+      # Read-only store image (squashfs) attached as the first virtio-blk disk.
+      # Built from the system closure on the host; sidesteps virtio-fs concurrency
+      # issues when multiple spirits share the host's /nix/store.
       fileSystems."/nix/.ro-store" = {
-        device = "/nix/.host/nix-store";
-        fsType = "none";
-        options = [ "bind" "ro" ];
-        depends = [ "/nix/.host" ];
+        device = "/dev/vda";
+        fsType = "squashfs";
+        options = [ "ro" ];
         neededForBoot = true;
       };
 
@@ -177,6 +171,9 @@ in
         neededForBoot = true;
       };
 
+      # make-squashfs places store paths directly at the squashfs root (their
+      # basenames), not under /nix/store/. Match the NixOS ISO image overlay
+      # layout: lowerdir is the squashfs root itself.
       fileSystems."/nix/store" = {
         fsType = "overlay";
         overlay = {
@@ -190,27 +187,15 @@ in
         neededForBoot = true;
       };
 
-      # Bind-mount the nix DB from the shared virtiofs device
-      fileSystems."/nix/.ro-db" = {
-        device = "/nix/.host/nix-db";
-        fsType = "none";
-        options = [ "bind" "ro" ];
-        depends = [ "/nix/.host" ];
-        neededForBoot = true;
-      };
-
-      # Copy host DB to writable tmpfs (fast file copy, avoids SQLite locking issues with overlay).
-      # Copy WAL/SHM sidecars too, otherwise the DB snapshot can be stale if the host DB has
-      # uncheckpointed transactions.
+      # Populate the nix DB from the registration shipped inside the store image.
       boot.postBootCommands = ''
         mkdir -p /nix/var/nix/db /nix/var/nix/gcroots /nix/var/nix/profiles /nix/var/nix/userpool
         mkdir -p /nix/var/nix/daemon-socket
         chmod 0755 /nix/var/nix/daemon-socket
 
-        rm -f /nix/var/nix/db/db.sqlite /nix/var/nix/db/db.sqlite-wal /nix/var/nix/db/db.sqlite-shm
-        cp /nix/.ro-db/db.sqlite /nix/var/nix/db/db.sqlite
-        [ ! -e /nix/.ro-db/db.sqlite-wal ] || cp /nix/.ro-db/db.sqlite-wal /nix/var/nix/db/db.sqlite-wal
-        [ ! -e /nix/.ro-db/db.sqlite-shm ] || cp /nix/.ro-db/db.sqlite-shm /nix/var/nix/db/db.sqlite-shm
+        if [ ! -e /nix/var/nix/db/db.sqlite ]; then
+          ${config.nix.package.out}/bin/nix-store --load-db < /nix/.ro-store/nix-path-registration
+        fi
       '';
 
       # Skip firewall behind NAT for faster boot
@@ -276,8 +261,6 @@ in
 
     # Ephemeral root disk — replaces tmpfs root with a disk image that is reset on each boot
     (lib.mkIf cfg.ephemeralDisk.enable {
-      boot.initrd.availableKernelModules = [ "virtio_blk" ];
-
       boot.initrd.systemd.storePaths = [
         "${pkgs.e2fsprogs}/bin/tune2fs"
         "${pkgs.e2fsprogs}/sbin/mke2fs"
@@ -286,8 +269,8 @@ in
       # Format the empty disk before fsck/mount runs
       boot.initrd.systemd.services.format-ephemeral-disk = {
         description = "Format ephemeral disk if empty";
-        requires = [ "dev-vda.device" ];
-        after = [ "dev-vda.device" ];
+        requires = [ "dev-vdb.device" ];
+        after = [ "dev-vdb.device" ];
         requiredBy = [ "sysroot.mount" ];
         before = [
           "systemd-fsck-root.service"
@@ -302,22 +285,20 @@ in
           RemainAfterExit = true;
         };
         script = ''
-          if ! ${pkgs.e2fsprogs}/bin/tune2fs -l /dev/vda >/dev/null 2>&1; then
-            ${pkgs.e2fsprogs}/sbin/mke2fs -t ext4 -q /dev/vda
+          if ! ${pkgs.e2fsprogs}/bin/tune2fs -l /dev/vdb >/dev/null 2>&1; then
+            ${pkgs.e2fsprogs}/sbin/mke2fs -t ext4 -q /dev/vdb
           fi
         '';
       };
 
       fileSystems."/" = lib.mkForce {
-        device = "/dev/vda";
+        device = "/dev/vdb";
         fsType = "ext4";
       };
     })
 
     # Persistent disk
     (lib.mkIf cfg.disk.enable {
-      boot.initrd.availableKernelModules = [ "virtio_blk" ];
-
       boot.initrd.systemd.storePaths = lib.mkIf (cfg.disk.fsType == "ext4") [
         "${pkgs.e2fsprogs}/bin/tune2fs"
         "${pkgs.e2fsprogs}/sbin/mke2fs"

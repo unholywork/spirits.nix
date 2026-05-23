@@ -1,6 +1,7 @@
-# Root filesystem is ext4 on /dev/vda (not tmpfs)
+# Root filesystem is ext4 on /dev/vdb (not tmpfs).
+# /dev/vda is the read-only squashfs store image.
 run_test "root_is_ext4" "mount | grep ' / ' | grep -q ext4" || ((FAILURES++))
-run_test "root_is_vda" "mount | grep ' / ' | grep -q /dev/vda" || ((FAILURES++))
+run_test "root_is_vdb" "mount | grep ' / ' | grep -q /dev/vdb" || ((FAILURES++))
 
 # Nix store overlay works on disk-backed root
 run_test "nix_store_accessible" "test -d /nix/store" || ((FAILURES++))

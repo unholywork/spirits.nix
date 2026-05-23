@@ -8,7 +8,7 @@ struct Options {
     var cpus: Int = 4
     var memory: UInt64 = 4096
     var shares: [SharedDirectory] = []
-    var disks: [String] = []
+    var disks: [DiskSpec] = []
     var saveStatePath: String? = nil
     var restoreStatePath: String? = nil
     var headless: Bool = false
@@ -31,7 +31,7 @@ func parseArgs() -> Options {
           --cpus N                Number of virtual CPUs (default: 4)
           --memory N              Memory in MiB (default: 4096)
           --share PATH:TAG[:ro]   Virtio-fs share (repeatable, :ro for read-only)
-          --disk PATH             Disk image to attach (repeatable)
+          --disk PATH[:ro]        Disk image to attach (repeatable, :ro for read-only)
           --save-state PATH       Path used by the Ctrl-] menu 's' option to save VM state
           --restore-state PATH    Restore VM state from file (skip boot)
           --bridged-interface IF  Bridge VM network to host interface (e.g. en0)
@@ -83,7 +83,10 @@ func parseArgs() -> Options {
             let ro = parts.count == 3 && parts[2] == "ro"
             opts.shares.append(SharedDirectory(hostPath: String(parts[0]), tag: String(parts[1]), readOnly: ro))
         case "--disk":
-            opts.disks.append(nextArg("--disk"))
+            let val = nextArg("--disk")
+            let parts = val.split(separator: ":", maxSplits: 1)
+            let ro = parts.count == 2 && parts[1] == "ro"
+            opts.disks.append(DiskSpec(path: String(parts[0]), readOnly: ro))
         case "--save-state":
             opts.saveStatePath = nextArg("--save-state")
         case "--restore-state":

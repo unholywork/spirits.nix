@@ -7,6 +7,11 @@ struct SharedDirectory {
     let readOnly: Bool
 }
 
+struct DiskSpec {
+    let path: String
+    let readOnly: Bool
+}
+
 enum VMConfigError: LocalizedError {
     case kernelNotFound(String)
     case initrdNotFound(String)
@@ -38,7 +43,7 @@ func createVMConfiguration(
     cpus: Int,
     memoryMiB: UInt64,
     shares: [SharedDirectory],
-    disks: [String],
+    disks: [DiskSpec],
     serialInput: FileHandle,
     bridgedInterface: String? = nil
 ) throws -> VMSetup {
@@ -109,12 +114,12 @@ func createVMConfiguration(
 
     // Disk images
     var storageDevices: [VZStorageDeviceConfiguration] = []
-    for diskPath in disks {
-        guard FileManager.default.fileExists(atPath: diskPath) else {
-            throw VMConfigError.diskNotFound(diskPath)
+    for disk in disks {
+        guard FileManager.default.fileExists(atPath: disk.path) else {
+            throw VMConfigError.diskNotFound(disk.path)
         }
-        let diskURL = URL(fileURLWithPath: diskPath)
-        let attachment = try VZDiskImageStorageDeviceAttachment(url: diskURL, readOnly: false)
+        let diskURL = URL(fileURLWithPath: disk.path)
+        let attachment = try VZDiskImageStorageDeviceAttachment(url: diskURL, readOnly: disk.readOnly)
         storageDevices.append(VZVirtioBlockDeviceConfiguration(attachment: attachment))
     }
     config.storageDevices = storageDevices
