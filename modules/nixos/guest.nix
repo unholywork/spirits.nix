@@ -126,6 +126,13 @@ in
       # Direct kernel boot — no bootloader needed
       boot.loader.grub.enable = false;
 
+      # Our /nix/store is an overlay; NixOS's default bind-remount-ro on top
+      # creates a duplicate mount entry that trips overlay inode tracking
+      # under load (NULL deref in ovl_i_path_real). The lower is already RO
+      # and the upper is ephemeral, so the bind-remount adds nothing. An
+      # empty list makes stage-2 skip the bind+remount entirely.
+      boot.nixStoreMountOpts = [ ];
+
       # Kernel modules required for virtio devices
       boot.initrd.availableKernelModules = [
         "virtio_console"
