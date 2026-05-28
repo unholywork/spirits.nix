@@ -17,9 +17,23 @@ let
   # Read-only store image containing the system closure. Mounted in the guest
   # as a virtio-blk disk instead of sharing /nix/store via virtio-fs, which
   # avoids the multi-VM contention on Apple's virtio-fs implementation.
+  #
+  # mksquashfs's default behaviour is to log "could not find file: ..., creating
+  # empty file" and exit 0 — which silently corrupts the store image. Wrap it
+  # so every invocation gets -exit-on-error and those warnings become hard
+  # failures instead.
+  strictSquashfsTools = linuxPkgs.symlinkJoin {
+    name = "squashfs-tools-exit-on-error";
+    paths = [ linuxPkgs.squashfsTools ];
+    nativeBuildInputs = [ linuxPkgs.makeWrapper ];
+    postBuild = ''
+      wrapProgram $out/bin/mksquashfs --append-flags -exit-on-error
+    '';
+  };
   storeImage = linuxPkgs.callPackage (linuxPkgs.path + "/nixos/lib/make-squashfs.nix") {
     storeContents = [ toplevel ];
     comp = "zstd -Xcompression-level 6";
+    squashfsTools = strictSquashfsTools;
   };
 
   kernelParams = builtins.concatStringsSep " " (
