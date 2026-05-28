@@ -41,7 +41,8 @@ let
   bridged = netCfg.mode == "bridged";
 
   ephemeralDiskSetup = lib.optionalString hasEphemeralDisk ''
-    EPHEMERAL_DISK="''${TMPDIR:-/tmp}/spirit-${name}.img"
+    EPHEMERAL_DISK="''${TMPDIR:-/tmp}"
+    EPHEMERAL_DISK="''${EPHEMERAL_DISK%/}/spirit-${name}.img"
     rm -f "$EPHEMERAL_DISK"
     truncate -s ${toString ephemeralDisk.sizeMiB}M "$EPHEMERAL_DISK"
   '';
