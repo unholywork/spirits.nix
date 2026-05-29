@@ -77,10 +77,21 @@ let
       RESTORE_ARGS=()
     fi
   '';
+
+  # GC-root the kernel/initrd/squashfs for the VM's lifetime — they reach the
+  # spirit binary only as argv strings, which Nix's GC doesn't see as live.
+  gcRootSetup = ''
+    GCROOT_DIR=$(mktemp -d -t spirit-${name}.XXXXXX)
+    trap 'rm -rf "$GCROOT_DIR"' EXIT
+    ${hostPkgs.nix}/bin/nix-store --add-root "$GCROOT_DIR/store-image" --indirect --realise ${storeImage} > /dev/null
+    ${hostPkgs.nix}/bin/nix-store --add-root "$GCROOT_DIR/kernel" --indirect --realise ${cfg.system.build.kernel} > /dev/null
+    ${hostPkgs.nix}/bin/nix-store --add-root "$GCROOT_DIR/initrd" --indirect --realise ${cfg.system.build.initialRamdisk} > /dev/null
+  '';
 in
 hostPkgs.writeShellApplication {
   inherit name;
   text = ''
+    ${gcRootSetup}
     ${ephemeralDiskSetup}
     ${diskSetup}
     ${stateSetup}
@@ -108,9 +119,10 @@ hostPkgs.writeShellApplication {
     ${lib.optionalString bridged ''
       # Bridged networking uses vmnet.framework which requires root.
       if [ "$(id -u)" -ne 0 ]; then
-        exec sudo "''${CMD[@]}"
+        sudo "''${CMD[@]}"
+        exit
       fi
     ''}
-    exec "''${CMD[@]}"
+    "''${CMD[@]}"
   '';
 }
