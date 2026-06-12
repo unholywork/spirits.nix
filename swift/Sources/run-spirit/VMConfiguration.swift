@@ -119,7 +119,15 @@ func createVMConfiguration(
             throw VMConfigError.diskNotFound(disk.path)
         }
         let diskURL = URL(fileURLWithPath: disk.path)
-        let attachment = try VZDiskImageStorageDeviceAttachment(url: diskURL, readOnly: disk.readOnly)
+        // Explicit modes instead of the .automatic default, which has been
+        // implicated in guest filesystem corruption (see UTM PR #5919, lima
+        // issue #1957).
+        let attachment = try VZDiskImageStorageDeviceAttachment(
+            url: diskURL,
+            readOnly: disk.readOnly,
+            cachingMode: .cached,
+            synchronizationMode: .full
+        )
         storageDevices.append(VZVirtioBlockDeviceConfiguration(attachment: attachment))
     }
     config.storageDevices = storageDevices

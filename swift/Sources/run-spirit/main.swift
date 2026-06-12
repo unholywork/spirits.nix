@@ -260,6 +260,41 @@ do {
 
     let vm = VZVirtualMachine(configuration: setup.config)
 
+    // Pause the VM across host sleep: guest memory is corrupted (pages
+    // zeroed) if the VM runs through a sleep/wake cycle. Sleep is held off
+    // until the pause completes. Kept alive for the process lifetime, like
+    // vmnetBridge above.
+    var pausedForSleep = false
+    let sleepWatcher = SleepWatcher(
+        onSleep: { ack in
+            guard vm.state == .running else {
+                ack()
+                return
+            }
+            fputs("\r\n[run-spirit] host is going to sleep; pausing VM...\r\n", stderr)
+            vm.pause { result in
+                switch result {
+                case .success:
+                    pausedForSleep = true
+                case .failure(let error):
+                    fputs("[run-spirit] failed to pause VM for sleep: \(error.localizedDescription)\r\n", stderr)
+                }
+                ack()
+            }
+        },
+        onWake: {
+            guard pausedForSleep else { return }
+            pausedForSleep = false
+            fputs("\r\n[run-spirit] host woke up; resuming VM...\r\n", stderr)
+            vm.resume { result in
+                if case .failure(let error) = result {
+                    fputs("[run-spirit] failed to resume VM after wake: \(error.localizedDescription)\r\n", stderr)
+                }
+            }
+        }
+    )
+    _ = sleepWatcher
+
     if !opts.headless {
         setupRawTerminal()
     }
