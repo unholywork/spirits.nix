@@ -24,7 +24,7 @@ let
   # failures instead.
   strictSquashfsTools = linuxPkgs.symlinkJoin {
     name = "squashfs-tools-exit-on-error";
-    paths = [ linuxPkgs.squashfsTools ];
+    paths = [ linuxPkgs.squashfs-tools ];
     nativeBuildInputs = [ linuxPkgs.makeWrapper ];
     postBuild = ''
       wrapProgram $out/bin/mksquashfs --append-flags -exit-on-error
@@ -33,7 +33,7 @@ let
   storeImage = linuxPkgs.callPackage (linuxPkgs.path + "/nixos/lib/make-squashfs.nix") {
     storeContents = [ toplevel ];
     comp = "zstd -Xcompression-level 6";
-    squashfsTools = strictSquashfsTools;
+    squashfs-tools = strictSquashfsTools;
   };
 
   kernelParams = builtins.concatStringsSep " " (
