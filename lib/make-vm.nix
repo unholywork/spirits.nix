@@ -14,10 +14,12 @@ let
   kernelPath = "${cfg.system.build.kernel}/${cfg.system.boot.loader.kernelFile}";
   initrdPath = "${cfg.system.build.initialRamdisk}/${cfg.system.boot.loader.initrdFile}";
 
-  # Read-only store image containing the system closure. Mounted in the guest
-  # as a virtio-blk disk instead of sharing /nix/store via virtio-fs, which
-  # avoids the multi-VM contention on Apple's virtio-fs implementation.
-  #
+  # Store mode. "image" builds a read-only squashfs of the system closure and
+  # mounts it as a virtio-blk disk, which avoids the multi-VM contention on
+  # Apple's virtio-fs implementation. "shared" hands the host's own /nix/store
+  # and Nix DB to the guest over virtio-fs instead.
+  sharedStore = spiritsCfg.store.mode == "shared";
+
   # mksquashfs's default behaviour is to log "could not find file: ..., creating
   # empty file" and exit 0 — which silently corrupts the store image. Wrap it
   # so every invocation gets -exit-on-error and those warnings become hard
@@ -78,12 +80,15 @@ let
     fi
   '';
 
-  # GC-root the kernel/initrd/squashfs for the VM's lifetime — they reach the
-  # spirit binary only as argv strings, which Nix's GC doesn't see as live.
+  # GC-root the kernel/initrd and the store contents for the VM's lifetime —
+  # they reach the spirit binary only as argv strings (or, in shared mode, only
+  # via the guest's kernel cmdline), which Nix's GC doesn't see as live.
   gcRootSetup = ''
     GCROOT_DIR=$(mktemp -d -t spirit-${name}.XXXXXX)
     trap 'rm -rf "$GCROOT_DIR"' EXIT
-    ${hostPkgs.nix}/bin/nix-store --add-root "$GCROOT_DIR/store-image" --indirect --realise ${storeImage} > /dev/null
+    ${hostPkgs.nix}/bin/nix-store --add-root "$GCROOT_DIR/store" --indirect --realise ${
+      if sharedStore then toplevel else storeImage
+    } > /dev/null
     ${hostPkgs.nix}/bin/nix-store --add-root "$GCROOT_DIR/kernel" --indirect --realise ${cfg.system.build.kernel} > /dev/null
     ${hostPkgs.nix}/bin/nix-store --add-root "$GCROOT_DIR/initrd" --indirect --realise ${cfg.system.build.initialRamdisk} > /dev/null
   '';
@@ -102,11 +107,15 @@ hostPkgs.writeShellApplication {
       --cmdline "$(printf '%s' ${lib.escapeShellArg kernelParams})"
       --cpus ${toString spiritsCfg.cpus}
       --memory ${toString spiritsCfg.memoryMiB}
-      --disk ${storeImage}:ro
+      ${
+        if sharedStore then
+          "--share /nix/store:nix-store:ro\n      --share /nix/var/nix/db:nix-db:ro"
+        else
+          "--disk ${storeImage}:ro"
+      }
       ${lib.concatStringsSep "\n      " (
         lib.mapAttrsToList (
-          tag: share:
-          "--share ${share.hostPath}:${tag}${lib.optionalString share.readOnly ":ro"}"
+          tag: share: "--share ${share.hostPath}:${tag}${lib.optionalString share.readOnly ":ro"}"
         ) sharedDirs
       )}
       ${lib.optionalString hasEphemeralDisk ''--disk "$EPHEMERAL_DISK"''}

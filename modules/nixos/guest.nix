@@ -8,9 +8,39 @@
 
 let
   cfg = config.spirit;
+
+  sharedStore = cfg.store.mode == "shared";
+
+  # Virtio-blk devices are enumerated in the order make-vm.nix passes them:
+  # the store image (image mode only), then the ephemeral disk, then the
+  # persistent disk. Dropping the store image shifts everything down one letter.
+  diskDevice = index: "/dev/vd${builtins.elemAt (lib.stringToCharacters "abcdefgh") index}";
+  storeDiskCount = if sharedStore then 0 else 1;
+  ephemeralDevice = diskDevice storeDiskCount;
+  persistentDevice = diskDevice (storeDiskCount + (if cfg.ephemeralDisk.enable then 1 else 0));
 in
 {
   options.spirit = {
+    store.mode = lib.mkOption {
+      type = lib.types.enum [
+        "image"
+        "shared"
+      ];
+      default = "image";
+      description = ''
+        How the guest gets its Nix store.
+
+        `image` builds a read-only squashfs of the system closure on the host and
+        attaches it as a virtio-blk disk. Self-contained, and avoids the virtio-fs
+        contention that shows up when several spirits run at once.
+
+        `shared` mounts the host's `/nix/store` and Nix database read-only over
+        virtio-fs, as spirits did originally. Nothing to build at switch time and
+        the guest sees every host store path, but concurrent VMs contend on
+        Apple's virtio-fs implementation.
+      '';
+    };
+
     cpus = lib.mkOption {
       type = lib.types.int;
       default = 4;
@@ -93,8 +123,8 @@ in
       enable = lib.mkEnableOption "persistent disk";
       device = lib.mkOption {
         type = lib.types.str;
-        default = if cfg.ephemeralDisk.enable then "/dev/vdc" else "/dev/vdb";
-        defaultText = lib.literalExpression ''if cfg.ephemeralDisk.enable then "/dev/vdc" else "/dev/vdb"'';
+        default = persistentDevice;
+        defaultText = lib.literalExpression "the first free virtio-blk device";
         description = "Block device path for the persistent disk.";
       };
       fsType = lib.mkOption {
@@ -158,15 +188,30 @@ in
         ];
       };
 
-      # Read-only store image (squashfs) attached as the first virtio-blk disk.
-      # Built from the system closure on the host; sidesteps virtio-fs concurrency
-      # issues when multiple spirits share the host's /nix/store.
-      fileSystems."/nix/.ro-store" = {
-        device = "/dev/vda";
-        fsType = "squashfs";
-        options = [ "ro" ];
-        neededForBoot = true;
-      };
+      # The read-only lower half of the store. In image mode it is a squashfs
+      # built from the system closure on the host and attached as the first
+      # virtio-blk disk, which sidesteps virtio-fs concurrency issues when
+      # multiple spirits run at once. In shared mode it is the host's own
+      # /nix/store, bind-mounted read-only off the virtio-fs share.
+      fileSystems."/nix/.ro-store" =
+        if sharedStore then
+          {
+            device = "/nix/.host/nix-store";
+            fsType = "none";
+            options = [
+              "bind"
+              "ro"
+            ];
+            depends = [ "/nix/.host" ];
+            neededForBoot = true;
+          }
+        else
+          {
+            device = "/dev/vda";
+            fsType = "squashfs";
+            options = [ "ro" ];
+            neededForBoot = true;
+          };
 
       fileSystems."/nix/.rw-store" = lib.mkIf (!cfg.ephemeralDisk.enable) {
         device = "none";
@@ -190,20 +235,49 @@ in
         };
         depends = [
           "/nix/.ro-store"
-        ] ++ lib.optional (!cfg.ephemeralDisk.enable) "/nix/.rw-store";
+        ]
+        ++ lib.optional (!cfg.ephemeralDisk.enable) "/nix/.rw-store";
         neededForBoot = true;
       };
 
-      # Populate the nix DB from the registration shipped inside the store image.
+      # The host Nix DB, shared read-only alongside the store (shared mode only).
+      fileSystems."/nix/.ro-db" = lib.mkIf sharedStore {
+        device = "/nix/.host/nix-db";
+        fsType = "none";
+        options = [
+          "bind"
+          "ro"
+        ];
+        depends = [ "/nix/.host" ];
+        neededForBoot = true;
+      };
+
       boot.postBootCommands = ''
         mkdir -p /nix/var/nix/db /nix/var/nix/gcroots /nix/var/nix/profiles /nix/var/nix/userpool
         mkdir -p /nix/var/nix/daemon-socket
         chmod 0755 /nix/var/nix/daemon-socket
 
-        if [ ! -e /nix/var/nix/db/db.sqlite ]; then
-          ${config.nix.package.out}/bin/nix-store --load-db < /nix/.ro-store/nix-path-registration
-        fi
-      '';
+      ''
+      + (
+        if sharedStore then
+          # Copy the host DB to writable tmpfs (fast file copy, avoids SQLite
+          # locking issues with overlay). Copy the WAL/SHM sidecars too, otherwise
+          # the snapshot can be stale if the host DB has uncheckpointed
+          # transactions.
+          ''
+            rm -f /nix/var/nix/db/db.sqlite /nix/var/nix/db/db.sqlite-wal /nix/var/nix/db/db.sqlite-shm
+            cp /nix/.ro-db/db.sqlite /nix/var/nix/db/db.sqlite
+            [ ! -e /nix/.ro-db/db.sqlite-wal ] || cp /nix/.ro-db/db.sqlite-wal /nix/var/nix/db/db.sqlite-wal
+            [ ! -e /nix/.ro-db/db.sqlite-shm ] || cp /nix/.ro-db/db.sqlite-shm /nix/var/nix/db/db.sqlite-shm
+          ''
+        else
+          # Populate the nix DB from the registration shipped inside the store image.
+          ''
+            if [ ! -e /nix/var/nix/db/db.sqlite ]; then
+              ${config.nix.package.out}/bin/nix-store --load-db < /nix/.ro-store/nix-path-registration
+            fi
+          ''
+      );
 
       # Skip firewall behind NAT for faster boot
       networking.firewall.enable = lib.mkDefault (cfg.networking.mode == "bridged");
@@ -276,8 +350,8 @@ in
       # Format the empty disk before fsck/mount runs
       boot.initrd.systemd.services.format-ephemeral-disk = {
         description = "Format ephemeral disk if empty";
-        requires = [ "dev-vdb.device" ];
-        after = [ "dev-vdb.device" ];
+        requires = [ "${utils.escapeSystemdPath ephemeralDevice}.device" ];
+        after = [ "${utils.escapeSystemdPath ephemeralDevice}.device" ];
         requiredBy = [ "sysroot.mount" ];
         before = [
           "systemd-fsck-root.service"
@@ -292,14 +366,14 @@ in
           RemainAfterExit = true;
         };
         script = ''
-          if ! ${pkgs.e2fsprogs}/bin/tune2fs -l /dev/vdb >/dev/null 2>&1; then
-            ${pkgs.e2fsprogs}/sbin/mke2fs -t ext4 -q /dev/vdb
+          if ! ${pkgs.e2fsprogs}/bin/tune2fs -l ${ephemeralDevice} >/dev/null 2>&1; then
+            ${pkgs.e2fsprogs}/sbin/mke2fs -t ext4 -q ${ephemeralDevice}
           fi
         '';
       };
 
       fileSystems."/" = lib.mkForce {
-        device = "/dev/vdb";
+        device = ephemeralDevice;
         fsType = "ext4";
       };
     })

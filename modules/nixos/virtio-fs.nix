@@ -28,25 +28,32 @@ in
     description = "Additional host directories to share with the guest via virtio-fs.";
   };
 
-  # Virtio-fs is only attached to the VM when there are user shares — there is no
-  # device to mount otherwise. The store and DB no longer ride virtio-fs (they
-  # come from a virtio-blk squashfs), so this whole subtree is conditional.
-  config.fileSystems = lib.optionalAttrs (cfg.sharedDirectories != { }) {
-    # Single virtiofs mount for all host shares, then bind-mount subdirectories.
-    # Not mounted ro — individual shares control their own read-only flag via
-    # the virtiofs device layer and bind-mount options.
-    "/nix/.host" = {
-      device = "shares";
-      fsType = "virtiofs";
-      neededForBoot = true;
-    };
-  } // lib.mapAttrs' (
-    tag: share:
-    lib.nameValuePair share.mountPoint {
-      device = "/nix/.host/${tag}";
-      fsType = "none";
-      options = [ "bind" ] ++ lib.optional share.readOnly "ro";
-      depends = [ "/nix/.host" ];
+  config.assertions = lib.mapAttrsToList (tag: _: {
+    assertion = !(cfg.store.mode == "shared" && (tag == "nix-store" || tag == "nix-db"));
+    message = "spirit.sharedDirectories.${tag}: the tags \"nix-store\" and \"nix-db\" are reserved when spirit.store.mode = \"shared\".";
+  }) cfg.sharedDirectories;
+
+  # Virtio-fs is only attached to the VM when something needs it — there is no
+  # device to mount otherwise. In the default image mode the store and DB ride a
+  # virtio-blk squashfs instead, so with no user shares the whole subtree is gone.
+  config.fileSystems =
+    lib.optionalAttrs (cfg.sharedDirectories != { } || cfg.store.mode == "shared") {
+      # Single virtiofs mount for all host shares, then bind-mount subdirectories.
+      # Not mounted ro — individual shares control their own read-only flag via
+      # the virtiofs device layer and bind-mount options.
+      "/nix/.host" = {
+        device = "shares";
+        fsType = "virtiofs";
+        neededForBoot = true;
+      };
     }
-  ) cfg.sharedDirectories;
+    // lib.mapAttrs' (
+      tag: share:
+      lib.nameValuePair share.mountPoint {
+        device = "/nix/.host/${tag}";
+        fsType = "none";
+        options = [ "bind" ] ++ lib.optional share.readOnly "ro";
+        depends = [ "/nix/.host" ];
+      }
+    ) cfg.sharedDirectories;
 }

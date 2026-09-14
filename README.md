@@ -119,3 +119,17 @@ While a VM is running, press **Ctrl+]** to pause it and open the control menu:
 - Guests create an overlay over the squashfs-backed `/nix/store` so `nix` commands can write to the store.
 - The Nix DB is populated from `nix-path-registration` shipped inside the squashfs, so `nix` commands work inside the guest.
 - With `ephemeralDisk.enable = true`, root switches to an ext4 disk image that is recreated on each boot. This reduces RAM demand and allows for larger nix stores.
+
+### Sharing the host store instead
+
+```nix
+spirit.store.mode = "shared";
+```
+
+Instead of building a squashfs, the host's `/nix/store` and `/nix/var/nix/db` are shared read-only with the guest over virtio-fs and mounted at `/nix/.ro-store` and `/nix/.ro-db`. The overlay on top and the rest of the guest setup are unchanged; the DB is copied to writable tmpfs on boot.
+
+Trade-offs:
+
+- Nothing to build or compress at switch time, and the guest sees every path in the host store — not just its own system closure.
+- Concurrent spirits contend on Apple's virtio-fs implementation, which is what motivated the squashfs default. Prefer `"image"` when running several VMs at once.
+- Guest block devices shift down one letter, since there is no store disk: an ephemeral root becomes `/dev/vda` and a persistent disk `/dev/vda`/`/dev/vdb`. `spirit.disk.device` defaults accordingly.
